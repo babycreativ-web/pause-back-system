@@ -2,34 +2,34 @@ import React, { useState, useEffect } from 'react';
 import { Users, LayoutDashboard, FileText, Plus, Trash2, Calendar, Search, Download, TrendingUp, Clock, Sun, RefreshCw, Activity, Coffee, Moon } from 'lucide-react';
 import { dataService } from '../services/dataService';
 
-// SUB-COMPONENT FOR REAL-TIME TICKING CLOCK
-const RealTimeClock = ({ status, startedAt }) => {
-  const [elapsed, setElapsed] = useState(0);
+// SUB-COMPONENT FOR REAL-TIME BREAK COUNTER (Sums historical + current active)
+const LiveBreakCounter = ({ status, startedAt, baseMinutes }) => {
+  const [currentActiveMins, setCurrentActiveMins] = useState(0);
 
   useEffect(() => {
-    if (status === 'idle' || !startedAt) {
-      setElapsed(0);
+    // Only tick if the agent is CURRENTLY on a break/prayer
+    if (status !== 'pause' && status !== 'prayer') {
+      setCurrentActiveMins(0);
       return;
     }
+
     const interval = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+      const elapsedSecs = Math.floor((Date.now() - startedAt) / 1000);
+      setCurrentActiveMins(Math.floor(elapsedSecs / 60));
     }, 1000);
+
     return () => clearInterval(interval);
   }, [status, startedAt]);
 
-  const formatTime = (s) => {
-    const hrs = Math.floor(s / 3600);
-    const mins = Math.floor((s % 3600) / 60);
-    const secs = s % 60;
-    return `${hrs > 0 ? hrs + 'h ' : ''}${mins}min ${secs}s`;
-  };
-
-  if (status === 'idle') return <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Paused / Offline</span>;
+  const total = baseMinutes + currentActiveMins;
 
   return (
-    <span style={{ fontWeight: '700', fontFamily: 'monospace', fontSize: '1.1rem', letterSpacing: '1px', color: status === 'working' ? 'var(--accent-emerald)' : 'var(--accent-amber)' }}>
-      {formatTime(elapsed)}
-    </span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+      <Coffee size={16} color={status === 'pause' || status === 'prayer' ? 'var(--accent-amber)' : 'var(--text-secondary)'} className={status === 'pause' || status === 'prayer' ? 'pulse' : ''} />
+      <span style={{ fontWeight: '800', fontSize: '1.1rem', color: status === 'pause' || status === 'prayer' ? 'var(--accent-amber)' : 'var(--text-secondary)' }}>
+        {total} <span style={{ fontSize: '0.8rem', fontWeight: '400' }}>min</span>
+      </span>
+    </div>
   );
 };
 
@@ -84,8 +84,8 @@ const AdminPanel = ({ user, onLogout }) => {
 
   const metrics = calculateMetrics();
 
-  // Helper to calculate today's total pause for a specific agent
-  const getTodayTotalPause = (agentId) => {
+  // Helper to calculate today's total FINISHED pause for a agent
+  const getTodayBasePauseMins = (agentId) => {
     const today = new Date().toISOString().split('T')[0];
     const agentLogs = logs.filter(l => l.agent_id === agentId && l.date === today);
     const totalSeconds = agentLogs.reduce((acc, curr) => acc + (curr.pauseSeconds || 0) + (curr.prayerSeconds || 0), 0);
@@ -160,8 +160,7 @@ const AdminPanel = ({ user, onLogout }) => {
                 <tr style={{ background: 'rgba(255, 255, 255, 0.05)' }}>
                   <th style={{ padding: '1.5rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '1px' }}>Agent</th>
                   <th style={{ padding: '1.5rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '1px' }}>Live Status</th>
-                  <th style={{ padding: '1.5rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '1px' }}>Time in State</th>
-                  <th style={{ padding: '1.5rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '1px' }}>Today's Breaks</th>
+                  <th style={{ padding: '1.5rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '1px' }}>Today's Total Breaks</th>
                   <th style={{ padding: '1.5rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '1px', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
@@ -182,13 +181,11 @@ const AdminPanel = ({ user, onLogout }) => {
                       </div>
                     </td>
                     <td style={{ padding: '1.5rem' }}>
-                      <RealTimeClock status={agent.status} startedAt={agent.status_started_at} />
-                    </td>
-                    <td style={{ padding: '1.5rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Coffee size={14} color="var(--accent-amber)" />
-                        <span style={{ fontWeight: '700', color: 'var(--accent-amber)' }}>{getTodayTotalPause(agent.id)} min</span>
-                      </div>
+                      <LiveBreakCounter 
+                        status={agent.status} 
+                        startedAt={agent.status_started_at} 
+                        baseMinutes={getTodayBasePauseMins(agent.id)} 
+                      />
                     </td>
                     <td style={{ padding: '1.5rem', textAlign: 'right' }}>
                       <button onClick={() => setConfirmDeleteId(agent.id)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.6, padding: '0.5rem' }}>
