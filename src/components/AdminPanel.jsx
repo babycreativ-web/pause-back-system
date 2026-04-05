@@ -84,6 +84,14 @@ const AdminPanel = ({ user, onLogout }) => {
 
   const metrics = calculateMetrics();
 
+  // Helper to calculate today's total pause for a specific agent
+  const getTodayTotalPause = (agentId) => {
+    const today = new Date().toISOString().split('T')[0];
+    const agentLogs = logs.filter(l => l.agent_id === agentId && l.date === today);
+    const totalSeconds = agentLogs.reduce((acc, curr) => acc + (curr.pauseSeconds || 0) + (curr.prayerSeconds || 0), 0);
+    return Math.floor(totalSeconds / 60);
+  };
+
   return (
     <div className="container animate-fade-in" style={{ paddingBottom: '5rem' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem' }}>
@@ -153,6 +161,7 @@ const AdminPanel = ({ user, onLogout }) => {
                   <th style={{ padding: '1.5rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '1px' }}>Agent</th>
                   <th style={{ padding: '1.5rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '1px' }}>Live Status</th>
                   <th style={{ padding: '1.5rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '1px' }}>Time in State</th>
+                  <th style={{ padding: '1.5rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '1px' }}>Today's Breaks</th>
                   <th style={{ padding: '1.5rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '1px', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
@@ -174,6 +183,12 @@ const AdminPanel = ({ user, onLogout }) => {
                     </td>
                     <td style={{ padding: '1.5rem' }}>
                       <RealTimeClock status={agent.status} startedAt={agent.status_started_at} />
+                    </td>
+                    <td style={{ padding: '1.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Coffee size={14} color="var(--accent-amber)" />
+                        <span style={{ fontWeight: '700', color: 'var(--accent-amber)' }}>{getTodayTotalPause(agent.id)} min</span>
+                      </div>
                     </td>
                     <td style={{ padding: '1.5rem', textAlign: 'right' }}>
                       <button onClick={() => setConfirmDeleteId(agent.id)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.6, padding: '0.5rem' }}>
