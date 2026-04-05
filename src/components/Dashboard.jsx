@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, Sun, RotateCcw, LogOut, Clock, Calendar } from 'lucide-react';
 import { dataService } from '../services/dataService';
 
@@ -7,16 +7,20 @@ const Dashboard = ({ user, onLogout }) => {
   const [seconds, setSeconds] = useState(() => parseInt(localStorage.getItem(`pb_seconds_${user.id}`)) || 0);
   const [logs, setLogs] = useState([]);
   const [startTime, setStartTime] = useState(() => localStorage.getItem(`pb_start_${user.id}`) || null);
+  
+  // Track when the current state started specifically for duration calculations
+  const [lastActionTime, setLastActionTime] = useState(Date.now());
+  const timerRef = useRef(null);
 
   useEffect(() => {
-    // Load historical logs for this agent from Supabase
-    const fetchLogs = async () => {
-      const allLogs = await dataService.getLogs();
-      const myLogs = allLogs.filter(l => l.agent_id === user.id);
-      setLogs(myLogs);
-    };
     fetchLogs();
   }, [user.id]);
+
+  const fetchLogs = async () => {
+    const allLogs = await dataService.getLogs();
+    const myLogs = allLogs.filter(l => l.agent_id === user.id);
+    setLogs(myLogs);
+  };
 
   useEffect(() => {
     localStorage.setItem(`pb_status_${user.id}`, status);
@@ -25,15 +29,14 @@ const Dashboard = ({ user, onLogout }) => {
   }, [status, seconds, startTime, user.id]);
 
   useEffect(() => {
-    let interval = null;
     if (status === 'working') {
-      interval = setInterval(() => {
+      timerRef.current = setInterval(() => {
         setSeconds((s) => s + 1);
       }, 1000);
     } else {
-      clearInterval(interval);
+      clearInterval(timerRef.current);
     }
-    return () => clearInterval(interval);
+    return () => clearInterval(timerRef.current);
   }, [status]);
 
   const formatTime = (s) => {
@@ -43,53 +46,44 @@ const Dashboard = ({ user, onLogout }) => {
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const addLog = async (action) => {
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-    const logEntry = { 
-      agentId: user.id, 
-      agentName: user.name, 
-      action, 
-      time: timeStr, 
-      date: now.toISOString().split('T')[0],
-      timestamp: now.getTime() 
+  const changeStatus = async (newStatus, actionName) => {
+    const now = Date.now();
+    const elapsedSeconds = Math.floor((now - lastActionTime) / 1000);
+    
+    const logData = {
+      agentId: user.id,
+      agentName: user.name,
+      action: actionName,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+      date: new Date().toISOString().split('T')[0],
+      timestamp: now,
+      workSeconds: status === 'working' ? elapsedSeconds : 0,
+      pauseSeconds: status === 'pause' ? elapsedSeconds : 0,
+      prayerSeconds: status === 'prayer' ? elapsedSeconds : 0
     };
+
+    // 1. Log the end of the previous action (with duration)
+    await dataService.saveLog(logData);
     
-    // Optimistic UI update
-    setLogs((prev) => [{...logEntry, agent_id: user.id, agent_name: user.name}, ...prev]);
+    // 2. Update current real-time status in Supabase
+    await dataService.updateAgentStatus(user.id, newStatus);
     
-    // Save to Cloud
-    await dataService.saveLog(logEntry);
+    // 3. Update local UI
+    setStatus(newStatus);
+    setLastActionTime(now);
+    fetchLogs();
   };
 
   const handleStartWork = () => {
-    setStatus('working');
-    if (!startTime) {
-      const now = new Date().toLocaleTimeString();
-      setStartTime(now);
-    }
-    addLog('Start Work');
+    if (!startTime) setStartTime(new Date().toLocaleTimeString());
+    changeStatus('working', 'Start Work');
   };
 
-  const handlePause = () => {
-    setStatus('pause');
-    addLog('General Pause');
-  };
-
-  const handlePrayer = () => {
-    setStatus('prayer');
-    addLog('Pause Prayer');
-  };
-
-  const handleBack = () => {
-    setStatus('working');
-    addLog('Back to Work');
-  };
-
+  const handlePause = () => changeStatus('pause', 'General Pause');
+  const handlePrayer = () => changeStatus('prayer', 'Pause Prayer');
+  const handleBack = () => changeStatus('working', 'Back to Work');
   const handleEndDay = () => {
-    setStatus('idle');
-    addLog('End Day');
-    // Reset local session
+    changeStatus('idle', 'End Day');
     setSeconds(0);
     setStartTime(null);
     localStorage.removeItem(`pb_start_${user.id}`);
@@ -101,7 +95,7 @@ const Dashboard = ({ user, onLogout }) => {
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3rem' }}>
         <div>
           <h1 style={{ fontSize: '1.8rem' }}>Agent: {user.name}</h1>
-          <p style={{ color: 'var(--text-secondary)' }}>Today is {new Date().toLocaleDateString()}</p>
+          <p style={{ color: 'var(--text-secondary)' }}>Status: {status.toUpperCase()} | Cloud-Synced</p>
         </div>
         <button className="btn btn-secondary" onClick={onLogout}>
           <LogOut size={18} /> Logout
@@ -155,7 +149,7 @@ const Dashboard = ({ user, onLogout }) => {
 
         <div className="glass-card">
           <h3 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Clock size={20} /> My Cloud Activity Log
+            <Clock size={20} /> Cloud Activity Log
           </h3>
           <div style={{ overflowY: 'auto', maxHeight: '400px' }}>
             <ul style={{ listStyle: 'none' }}>
@@ -163,7 +157,9 @@ const Dashboard = ({ user, onLogout }) => {
                 <li key={i} style={{ padding: '1rem 0', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between' }}>
                   <div>
                     <div style={{ fontWeight: '600' }}>{log.action}</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{log.time}</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      {log.time} { (log.workSeconds || log.pauseSeconds || log.prayerSeconds) > 0 && `(+${Math.floor((log.workSeconds || log.pauseSeconds || log.prayerSeconds) / 60)}m)` }
+                    </div>
                   </div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', alignSelf: 'center' }}>{log.date}</div>
                 </li>

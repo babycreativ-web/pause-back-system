@@ -68,12 +68,36 @@ export const dataService = {
         action: logEntry.action,
         date: logEntry.date,
         time: logEntry.time,
-        timestamp: logEntry.timestamp 
+        timestamp: logEntry.timestamp,
+        workSeconds: logEntry.workSeconds || 0,
+        pauseSeconds: logEntry.pauseSeconds || 0,
+        prayerSeconds: logEntry.prayerSeconds || 0
       }]);
     
     if (error) {
       console.error('Error saving log:', error);
     }
+  },
+
+  // --- REAL-TIME STATUS ---
+  updateAgentStatus: async (agentId, status) => {
+    const { error } = await supabase
+      .from('agents')
+      .update({ status, status_started_at: Date.now() })
+      .eq('id', agentId);
+    
+    if (error) {
+      console.error('Error updating agent status:', error);
+    }
+  },
+
+  subscribeToAgents: (onUpdate) => {
+    return supabase
+      .channel('agents-realtime')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'agents' }, (payload) => {
+        onUpdate(payload.new);
+      })
+      .subscribe();
   },
 
   // Auth: Check if an agent is registered
